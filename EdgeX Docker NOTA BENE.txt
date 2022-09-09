@@ -1,0 +1,303 @@
+#!/bin/bash
+#####################################
+### EDGEX ONE SHOT DOCKER EDITION ###
+#####################################
+
+#
+## REPOS & DEPS ## GUIDA INSTALLAZIONE DOCKER ENGINE: https://docs.docker.com/engine/install/ubuntu/
+# 
+#Before you install Docker Engine for the first time on a new host machine, you need to set up the Docker repository:
+#
+sudo apt update
+sudo apt install ca-certificates curl gnupg lsb-release
+sudo mkdir -p /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+  $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list
+sudo apt update
+#
+### DOCKER INSTALL METHOD 1 ### Docker-Desktop doesn't work
+#
+#wget -O /tmp/dockerinstall.deb https://desktop.docker.com/linux/main/amd64/docker-desktop-4.9.0-amd64.deb && apt install /tmp/#dockerinstall.deb && apt --fix-broken install -y
+#
+### DOCKER ENGINE INSTALL METHOD 2 ### 
+# 
+sudo apt-get install docker-ce docker-ce-cli containerd.io docker-compose-plugin docker-compose
+#GPG error: try this SOLO IN CASO DI ERRORE
+#sudo chmod a+r /etc/apt/keyrings/docker.gpg
+
+#### EDGE X INSTALL ##### GUIDA https://docs.edgexfoundry.org/2.2/getting-started/Ch-GettingStartedDockerUsers/
+#
+#git clone https://github.com/edgexfoundry/edgex-compose.git && cd edgex-compose && cd compose-builder
+# HO FATTO DELLE MODIFICHE AI VARI CONTAINER, QUINDI UTILIZZARE LA VERSIONE DI edgex-compose PRESENTE SUL MIO REPOSITORY Github
+git clone https://github.com/rosemgo/edgex-compose-nosec.git && cd edgex-compose-nosec && cd compose-builder
+
+
+### STOP & CLEAN ALL DOCKERS ############################## FARE QUESTI COMANDI SU UNA MACCHINA DOVE NON CI SONO ALTRI DOCKER
+##exec as root
+docker stop $(docker ps -aq)
+docker rm -vf $(docker ps -aq)
+docker rmi -f $(docker images -aq)
+#
+
+#Prima di lanciare make gen con ds-coap è consigliabile creare l'immagine di device-coap-c, in modo tale da non ottenere l'immagine di default da nexus3
+
+make gen no-secty ds-mqtt mqtt-broker ds-coap ds-rest asc-mqtt && sudo docker-compose pull && sudo docker-compose up -d
+
+(MAKE GEN GENERA UN COMPOSE FILE CON I SERVIZI SPECIFICATI)
+
+###i servizi che possono essere aggiunti sono indicati nella sezione compose https://github.com/edgexfoundry/edgex-compose/tree/main/compose-builder:
+no-secty:      Generates non-secure compose file, otherwise generates secure compose file
+    arm64:         Generates compose file using ARM64 images
+    dev:           Generates compose file using local dev built images from edgex-go repo's
+                   'make docker' which creates docker images tagged with '0.0.0-dev'
+    app-dev:       Generates compose file using local dev built images from app-service-configurable repo's
+                   'make docker' which creates docker images tagged with '0.0.0-dev'
+    delayed-start: Generates compose file with delayed start services- spire related services and
+                   spiffe-token-provider service included
+    ds-bacnet:     Generates compose file with device-bacnet included
+    ds-camera:     Generates compose file with device-camera included
+    ds-grove:      Generates compose file with device-grove included (valid only with arm64 option)
+    ds-modbus:     Generates compose file with device-modbus included
+    ds-mqtt:       Generates compose file with device-mqtt included
+    ds-rest:       Generates compose file with device-rest included
+    ds-snmp:       Generates compose file with device-snmp included
+    ds-virtual:    Generates compose file with device-virtual included
+    ds-coap:       Generates compose file with device-coap included
+    ds-gpio:       Generates compose file with device-gpio included
+    ds-llrp:       Generates compose file with device-rfid-llrp included
+    modbus-sim:    Generates compose file with ModBus simulator included
+    asc-http:      Generates compose file with App Service HTTP Export included
+    asc-mqtt:      Generates compose file with App Service MQTT Export included
+    asc-metrics:   Generates compose file with App Service Metrics InfluxDb included
+    asc-sample:    Generates compose file with App Service Sample included
+    as-llrp:       Generates compose file with App RFID LLRP Inventory included
+    asc-ex-mqtt:   Generates compose file with App Service External MQTT Trigger included
+    mqtt-broker:   Generates compose file with a MQTT Broker service included
+    mqtt-bus:      Generates compose file with services configure for MQTT Message Bus
+                   The MQTT Broker service is also included.
+    zmq-bus:       Generates compose file with services configured for ZMQ Message Bus
+
+Di default le immagini vengono scaricate (pull) dal repository di nexus (https://nexus3.edgexfoundry.org:10004/v2), per utilizzare una immagine diversa per uno specifico servizio è necessario
+modificare la riga 'image:...' nel file 'add-...-...yml' (ad esempio: add-device-coap.yml) inserendo l'immagine da utilizzare, e poi rifare 'make gen no-secty ds-mqtt mqtt-broker ds-coap ds-rest asc-mqtt && sudo docker-compose pull && sudo docker-compose up -d'
+OPPURE modifico direttamente il docker-compose.yml ed eseguo solo sudo docker-compose up -d
+
+
+###ABILITARE LA RICEZIONE DATI DA UN DISPOSITIVO TRAMITE MQTT CON TOPIC MULTILEVEL (seguire la guida https://docs.edgexfoundry.org/2.2/examples/Ch-ExamplesAddingMQTTDevice/)
+E' importante cambiare nel docker-compose.yml le seguenti righe:
+	MQTTBROKERINFO_INCOMINGTOPIC: "incoming/data/#"
+      MQTTBROKERINFO_RESPONSETOPIC: "command/response/#"
+      MQTTBROKERINFO_USETOPICLEVELS: "true"
+
+###ABILITARE MOSQUITTO AD ACCETTARE CONNESSIONI DA QUALUNQUE INRFACCIA DI RETE
+nel file add-mqtt-broker.yml inserire 
+ports: - 0.0.0.0:1883:1883/tcp
+
+
+###RICEVERE DATI DA UN COAP CLIENT###
+(E' SPIEGATO QUI https://github.com/edgexfoundry/device-coap-c NELLA SEZIONE 'COMPOSE')
+è importante APRIRE LA PORTA UDP, nel file add-device-coap-yml oppure nel docker-compose.yml ED ACCETTARE CONNESSIONI IN INGRESSO DA QUALUNQUE INDIRIZZO: inserire nel docker-compose.yml in ports 
+    ports:
+    - 127.0.0.1:59988:59988/tcp
+    - 0.0.0.0:5684:5684/udp //ACCETTA CONNESSIONI IN INGRESSO SULLA PORTA 5684
+    - 0.0.0.0:5683:5683/udp //ACCETTA CONNESSIONI NoSec (senza TLS) IN INGRESSO SULLA PORTA 5683 
+
+# comando di test da terminale per inviare, l' intero 7987 con connessione TLS
+coap-client-gnutls -v6 -m post -u r17 -k 0N6iDGgu/kF4xoeg -t 0 -e 7987 coaps://127.0.0.1/a1r/d1/int
+# comando di test da terminale per inviare, l' intero 1001 con connessione NoSec:
+coap-client -m post -t 0 -e 1001 coap://127.0.0.1/a1r/d1/int -v9
+
+#ESPORTARE DATI IN MQTT NORDTHBOUND
+-METODO 1: aggiungere al 'sudo make gen' il servizio 'asc-mqtt' (asc sta per app-service-configurable) NON SERVE FARE MODIFICHE AL FILE add-asc-mqtt-export.yml (a meno che non si vuole cambiare broker a cui inviare i dati al northbound, però la modifica può essere fatta anche da gui edgex console))
+e modificare nel file compose-builder.yml al servizio mqtt-export le righe seguenti, per indicare il broker a cui inviare i dati ed il nome del topic
+WRITABLE_PIPELINE_FUNCTIONS_MQTTEXPORT_PARAMETERS_BROKERADDRESS: tcp://broker.mqttdashboard.com:1883
+WRITABLE_PIPELINE_FUNCTIONS_MQTTEXPORT_PARAMETERS_TOPIC: EdgeXROS
+In seguito alla modifica eseguire: 'sudo docker-compose up -d'
+
+### 
+N.B. PER ESPORTARE I DATI IN MQTT SU UN CLOUD IN MANIERA CRIPTATA CON CONNESSIONE TLS E' NECESSARIO USARE UN METODO DI AUTENTICAZIONE (es. username e passw)
+PER ESPORTARE SU ActiveMQ di Amazon AWS:
+- usare il link tls://b-413cd668-b305-412f-8d1f-fa5db15c2aba-1.mq.eu-south-1.amazonaws.com:8162/
+- settare AuthMode uguale a usernamepassword
+- tramite Consul andare in Key/Values - edgex - appservices - 2.0 - app-mqtt-export - Writable - InsecureSecrets - mqtt - Secrets
+- tramite Consul andare in Key/Values - edgex - appservices - 2.0 - app-mqtt-export - Writable - Pipeline - Functions - MQTTExport - Parameters - AuthMode
+ settare username e password (usare un utente abilitato al cloud ActiveMQ) 
+
+OPPURE INSERIRE DIRETTAMENTE IN environments DEL CONTEINER mqtt-export (IL SERVIZIO app-service-mqtt-export:):
+WRITABLE_PIPELINE_FUNCTIONS_MQTTEXPORT_PARAMETERS_BROKERADDRESS: ssl://b-413cd668-b305-412f-8d1f-fa5db15c2aba-1.mq.eu-south-1.amazonaws.com:8883 #tcp://broker.mqttdashboard.com:1883
+WRITABLE_PIPELINE_FUNCTIONS_MQTTEXPORT_PARAMETERS_TOPIC: EdgeXROS
+WRITABLE_PIPELINE_FUNCTIONS_MQTTEXPORT_PARAMETERS_AUTHMODE: usernamepassword
+WRITABLE_INSECURESECRETS_MQTT_SECRETS_USERNAME: admin
+WRITABLE_INSECURESECRETS_MQTT_SECRETS_PASSWORD: rosariomarcofrancesco
+
+###
+PAGINA principale di Active MQ del servizio broker AMAZON MQ (porta 8161)
+https://b-413cd668-b305-412f-8d1f-fa5db15c2aba-1.mq.eu-south-1.amazonaws.com:8162/index.html 
+BROKER MQTT in ascolto sulla portaa 8883 in Active MQ:
+ssl://b-413cd668-b305-412f-8d1f-fa5db15c2aba-1.mq.eu-south-1.amazonaws.com:8883
+###
+
+
+-METODO 2: https://docs.edgexfoundry.org/2.2/getting-started/quick-start/#exporting-data (GUIDA PER ESPORTARE DATI IN MQTT)
+(INSERIRE IN compose-builder.yml in edgex-compose/compose-builder N.B RISPETTARE L'INDENTAZIONE)
+  app-service-mqtt:
+    container_name: edgex-app-mqtt
+    depends_on:
+    - consul
+    - data
+    environment:
+      CLIENTS_CORE_COMMAND_HOST: edgex-core-command
+      CLIENTS_CORE_DATA_HOST: edgex-core-data
+      CLIENTS_CORE_METADATA_HOST: edgex-core-metadata
+      CLIENTS_SUPPORT_NOTIFICATIONS_HOST: edgex-support-notifications
+      CLIENTS_SUPPORT_SCHEDULER_HOST: edgex-support-scheduler
+      DATABASES_PRIMARY_HOST: edgex-redis
+      EDGEX_PROFILE: mqtt-export
+      EDGEX_SECURITY_SECRET_STORE: "false"
+      MESSAGEQUEUE_HOST: edgex-redis
+      REGISTRY_HOST: edgex-core-consul
+      SERVICE_HOST: edgex-app-mqtt
+      TRIGGER_EDGEXMESSAGEBUS_PUBLISHHOST_HOST: edgex-redis
+      TRIGGER_EDGEXMESSAGEBUS_SUBSCRIBEHOST_HOST: edgex-redis
+      WRITABLE_PIPELINE_FUNCTIONS_MQTTEXPORT_PARAMETERS_BROKERADDRESS: tcp://broker.mqttdashboard.com:1883
+      WRITABLE_PIPELINE_FUNCTIONS_MQTTEXPORT_PARAMETERS_TOPIC: EdgeXEvents
+    hostname: edgex-app-mqtt
+    image: edgexfoundry/app-service-configurable:2.0.0
+    networks:
+      edgex-network: {}
+    ports:
+    - 127.0.0.1:59702:59702/tcp
+    read_only: true
+    security_opt:
+    - no-new-privileges:true
+    user: 2002:2001
+
+CoAP vs MQTT
+
+An important aspect to cover is the main differences between CoAP and MQTT. As you may know MQTT is another protocol widely used in IoT. 
+There are several differences between these two protocols. The first aspect to notice is the different paradigm used. MQTT uses a publisher-subscriber  
+while CoAP uses a request-response paradigm. MQTT uses a central broker to dispatch messages coming from the publisher to the clients. 
+CoAP is essentially a one-to-one protocol very similar to the HTTP protocol. Moreover, MQTT is an event oriented protocol while CoAP is 
+more suitable for state transfer.
+
+### DEVICE-COAP-C
+#
+# sudo git clone https://github.com/edgexfoundry/device-coap-c.git
+# cd device-coap-c
+# git config --global --add safe.directory /home/rosario/device-coap-c
+# sudo make docker
+###ERRORE### potrebbe essere rilevato un errore nella compilazione, ossia che non trova il manifest 'device-coap:2.0.2-dev.8', per risolvere bisogna inserire 2.0.2-dev.8 nel file VERSION in device-coap-c   
+
+# cloning from my repo # HO FATTO DELLE MODIFICHE AL CODICE SORGENTE DEVICE-COAP-C QUINDI UTILIZZARE IL MIO REPO
+sudo git clone https://github.com/rosemgo/device-coap-c-nosec.git && cd device-coap-c-nosec
+sudo git config --global --add safe.directory /home/rosario/device-coap-c
+sudo make docker
+
+(modifica già indicata prima)
+## in edgex-compose/compose-builder/add-device-coap.yml:
+# image: edgexfoundry/device-coap:2.0.2-dev.8-dev
+#     ports:
+#     - "127.0.0.1:59988:59988"
+#     - "0.0.0.0:5684:5684/udp"
+#     - "0.0.0.0:5683:5683/udp"
+#
+
+###RIFARE
+make gen no-secty ds-mqtt mqtt-broker ds-coap && sudo docker-compose pull && sudo docker-compose up -d
+##ATTENZIONE INSERENDO image: edgexfoundry/device-coap:2.0.2-dev.8 IN add-device-coap.yml non bisogna fare sudo docker-compose pull, perchè l'immagine non sta su un repository online che deve essere scaricata, ma bisogna fare solo sudo docker-compose up -d
+
+
+
+
+
+###VERIFICARE SERVIZI ATTIVI
+sudo docker-compose ps
+
+###LOG DEVICE-COAP
+sudo docker logs -f edgex-device-coap
+
+###LOG device-mqtt
+sudo docker logs -f edgex-device-mqtt
+###LOG mqtt-broker
+sudo docker logs -f edgex-mqtt-broker
+
+#COMANDI UTILI PER I DOCKER https://docs.docker.com/engine/reference/commandline/docker/
+sudo docker images
+sudo docker container ls //per avere L'ID del container
+sudo docker rmi IDIMAGES //rimuovere immagine PER FORZARE LA CANCELLAZIONE DI UN IMMAGINE INSERIRE -f
+sudo docker rm IDCONTAINER //rimuovere container
+Per vedere i container e le immagini in esecuzione usare docker-compose: 
+sudo docker-compose ps
+sudo docker-compose stop
+
+### STOP & CLEAN ALL DOCKERS ############################## FARE QUESTI COMANDI SU UNA MACCHINA DOVE NON CI SONO ALTRI DOCKER PERCHè ELIMINANO TUTTI I DOCKER PRESENTI
+##eseguire come root (sudo su)
+docker stop $(docker ps -aq) //fornisce la lista di tutti i container
+docker rm -vf $(docker ps -aq)
+docker rmi -f $(docker images -aq)
+#
+#RIAVVIARE IL SERVIZIO DOCKER (risolve molti problemi)
+sudo docker-compose down
+sudo docker-compose stop
+sudo systemctl restart docker.socket docker.service
+#sudo service docker stop
+#sudo service docker start
+
+
+##COMANDI UTILI EDGEX
+PER VEDERE LA LISTA DI EVENTI SALVATI IN CORE-DATA DI TUTTI I DEVICE: http://localhost:4000/core-data/api/v2/event/all
+
+#URL per il servizio device-coap
+http://localhost:59988/api/v2/ping
+http://localhost:59988/api/v2/config
+http://127.0.0.1:59988/api/v2/device/name/d4/get
+
+#URL per inviare richieste get ad un dispositivo MQTT
+http://localhost:59882/api/v2/device/name/MQTT-custom-device/ping
+
+#URL per vedere i dati ricevuti da un dispositivo e salvati in Core Data
+http://localhost:59880/api/v2/event/device/name/MQTT-test-device
+
+
+
+
+LINUX GRAFANA INFLUXDB
+https://www.youtube.com/watch?v=G3D748Lc52w
+
+### modificare configuration.toml dei container quando non si ha il codice sorgente, ma viene scaricaro da nexus3 
+PER TROVARE I FILE configuration.toml DEI CONTAINER SI DEVE ANDARE IN var/lib/docker/overlay2 e fare la ricerca '.toml'
+
+
+
+
+
+#TEORIA MQTT COMMAND RESPONSE:
+https://nexus.edgexfoundry.org/content/sites/docs/staging/master/docs/_build/html/Ch-ExamplesMQTTDeviceService.html
+Il DataTopic viene utilizzato per ricevere e consentire al MQTT-device-service di leggere i dati prodotti dal sensore, poi MQTT-device-service li trasforma in richieste REST di eventi/lettura verso Core Data che memorizza i dati.
+Il topic CommandTopic viene utilizzato per pubblicare messaggi verso il sensore dopo che il MQTT-device-service ha ricevuto una richiesta di comando REST da Core Command per effettuare una richiesta get/set verso il sensore.
+ll servizio mqtt device service quando riceve una risposta nel topic ResponseTopic la interpreta e crea una risposta REST al micro servizio Core Command. 
+QUESTO AVVENIVA FINO ALLE VERSIONI PRECEDENTI ALLA 2.0 DI EDGEX POI LA MODALITA' DI COMUNICAZIONE TRA SERVIZI è CAMBIATA: NON SI EFFETTUANO PIù RICHIESTE REST
+MA LA MODALITà DI COMUNICAZIONE è PUBLISH/SUBSCRIBE inserendo i messaggi (dati acquisiti dai sensori) in un MESSAGE BUS TOPIC, ED IL SERVIZIO CORE DATA
+SI SOTTOSCRIVE A QUESTO TOPIC. GLI STESSI APP-SERVICE (ad esempio MQTT Export) SI SOTTOSCRIVONO AL TOPIC E RICEVONO I DATI.
+DI DEFAULT IL message bus E' IMPLEMENTATO USANDO REDIS PUB/SUB. (MQTT can be used as an alternate message bus implementation).
+è spiegato qui https://docs.edgexfoundry.org/2.2/microservices/core/data/Ch-CoreData/
+
+
+N.B.
+E' IMPORTANTE RICORDARE CHE LE MODIFICHE VANNO FATTE AI FILE add-service-...yml CHE POI FACENDO IL sudo make gen ds-.... i singoli servizi vengono
+utilizzati per creare il docker-compose.yml
+Quindi non è necessario modificare il docker-compose finale. In realtà è possibile farlo ma è più pulito modificare i file .yml dei singoli servizi
+in modo tale che ogni volta che viene eseguito il 'sudo make gen' si avrà un file docker-compose.yml che non perde le modifiche fatte, perchè queste sono presenti nei singoli file .yml
+Se modificassi direttamente il docker-compose.yml e non i device-add.yml, al rieseguire del comando 'sudo make gen' otterrei un docker-compose.yml generato 
+con i servizi scaricati dal docker hub originali, quindi perderei le modifiche fatte.
+
+
+N.B. ESEGUIRE IL CONTAINER device-coap-c E NON IL device-coap di nexus3 (docker hub)
+scaricare 'git clone device-coap-c' in compose builder, fare i cambiamenti voluti nel configuration.toml e poi fare 'sudo make docker'.
+per vedere l'id dell'immagine di device-coap creata eseguire 'sudo docker images' e prelevare l'id immagine nella tabella corrispondente al servizio edgexfoundry/device-coap 
+poi andare in docker-compose.yml ed al container device-coap cambiare l'immagine con quella relativa al device-coap-c che abbiamo appena compilato oppure inserire image: edgexfoundry/device-coap:2.0.2-dev.8-dev
+In realtà si può cambiare anche il file 'add-device-coap.yml' mettendo image: edgexfoundry/device-coap:2.0.2-dev.8-dev e poi fare 'make gen no-secty ds-mqtt mqtt-broker ds-coap ds-res', in modo tale che ricostruisca il file docker-compose-yml prendendo come servizio coap quello di device-coap.c
+poi eseguire 'sudo docker up -d' per deplyare le immagini nei container
+NB: quando eseguo make gen...... il sistema va a caricare i singoli file add-service-...yml (ad esempio add-service-coap.yml) per crearsi il docker-compose.yml
+quindi se nel add-service.coap.yml c'è scritto 'image: edgexfoundry/device-coap:2.0.2-dev.8-dev' verrà deployata questa immagine ne container
